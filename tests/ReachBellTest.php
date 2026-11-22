@@ -268,4 +268,64 @@ final class ReachBellTest extends TestCase
         restore_error_handler();
         $this->assertTrue($raised);
     }
+
+    public function testAllNullMapsStayJsonObjectsAndIntKeysArePreserved(): void
+    {
+        $t = new FakeTransport();
+        $rb = $this->client($t);
+        $rb->campaigns->send(['name' => 'Sale', 'content' => ['title' => 'T', 'data' => ['k' => null]], 'segment' => ['tags' => null]]);
+        $this->assertSame('{"name":"Sale","content":{"title":"T","data":{}},"segment":{}}', $t->calls[0]['body']);
+
+        $rb->events->track(['name' => 'e', 'properties' => [0 => 'a', 2 => null, 5 => 'b'], 'scores' => [1 => null, 0 => 'x']]);
+        $this->assertSame('{"name":"e","properties":{"0":"a","5":"b"},"scores":{"0":"x"}}', $t->calls[1]['body']);
+
+        $rb->events->track(['name' => 'e', 'list' => ['a', null], 'empty' => []]);
+        $this->assertSame('{"name":"e","list":["a",null],"empty":[]}', $t->calls[2]['body']);
+    }
+
+    public function testNonUtf8ErrorPageIsTruncated(): void
+    {
+        $html = '<html><body>' . str_repeat("Caf\xE9 indisponible ", 100) . '</body></html>';
+        try {
+            $this->client(new FakeTransport(502, $html))->request('GET', '/x');
+            $this->fail('expected exception');
+        } catch (ReachBellException $e) {
+            $this->assertStringStartsWith('ReachBell returned 502: Caf', $e->getMessage());
+            $this->assertLessThan(260, strlen($e->getMessage()));
+            $this->assertSame($html, $e->body);
+        }
+    }
+
+    public function testHeadersMergeCaseInsensitivelyAndApiKeyWins(): void
+    {
+        $t = new FakeTransport();
+        $rb = new ReachBell('rb_secret_test', ['transport' => $t, 'headers' => [
+            'X-API-KEY' => 'other', 'content-type' => 'application/merge-patch+json', 'accept' => 'text/plain', 'X-Trace' => '1',
+        ]]);
+        $rb->request('PATCH', '/x', ['a' => 1]);
+        $headers = $t->calls[0]['headers'];
+
+        $this->assertSame('rb_secret_test', $headers['x-api-key']);
+        $this->assertSame('application/merge-patch+json', $headers['Content-Type']);
+        $this->assertSame('text/plain', $headers['Accept']);
+        $this->assertSame('1', $headers['X-Trace']);
+        $lower = array_map('strtolower', array_keys($headers));
+        $this->assertSame($lower, array_unique($lower));
+        $this->assertCount(5, $headers);
+    }
+
+    public function testBlankBaseUrlFallsBackToDefault(): void
+    {
+        foreach (['', '   '] as $blank) {
+            $t = new FakeTransport();
+            (new ReachBell('rb_secret_test', ['baseUrl' => $blank, 'transport' => $t]))->request('GET', '/x');
+            $this->assertStringStartsWith(\ReachBell\Constants\Defaults::BASE_URL . '/x', $t->calls[0]['url']);
+        }
+    }
+
+    public function testClientCannotBeSerialized(): void
+    {
+        $this->expectException(\LogicException::class);
+        serialize($this->client(new FakeTransport()));
+    }
 }

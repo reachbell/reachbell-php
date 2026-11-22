@@ -38,8 +38,13 @@ final class ReachBell
                 E_USER_NOTICE,
             );
         }
-        $env = getenv('REACHBELL_API_URL');
-        $baseUrl = $options['baseUrl'] ?? ($env !== false && trim($env) !== '' ? trim($env) : Defaults::BASE_URL);
+        if (isset($options['baseUrl']) && !is_string($options['baseUrl'])) {
+            throw new \TypeError('ReachBell: the baseUrl option must be a string');
+        }
+        // A blank baseUrl option or REACHBELL_API_URL counts as unset.
+        $baseUrl = self::nonBlank($options['baseUrl'] ?? null)
+            ?? self::nonBlank(getenv('REACHBELL_API_URL'))
+            ?? Defaults::BASE_URL;
         $timeout = $options['timeout'] ?? Defaults::TIMEOUT;
         if (!is_int($timeout) && !is_float($timeout)) {
             throw new \TypeError('ReachBell: the timeout option must be an int or float number of seconds');
@@ -73,11 +78,20 @@ final class ReachBell
     }
 
     /**
-     * @param array<string, mixed>|list<mixed>|null $body
+     * @param array<string, mixed>|list<mixed>|\stdClass|null $body
      * @param array<string, scalar|null> $query
      */
-    public function request(string $method, string $path, ?array $body = null, array $query = []): mixed
+    public function request(string $method, string $path, array|\stdClass|null $body = null, array $query = []): mixed
     {
         return $this->http->request($method, $path, $body, $query);
+    }
+
+    private static function nonBlank(mixed $value): ?string
+    {
+        if (!is_string($value)) {
+            return null;
+        }
+        $value = trim($value);
+        return $value === '' ? null : $value;
     }
 }

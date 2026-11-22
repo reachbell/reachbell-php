@@ -24,7 +24,7 @@ final class ReachBell
     private readonly HttpClient $http;
 
     /**
-     * @param array{baseUrl?: string, timeout?: int, transport?: Transport, headers?: array<string, string>} $options
+     * @param array{baseUrl?: string, timeout?: int|float, transport?: Transport, headers?: array<string, string>} $options
      */
     public function __construct(#[\SensitiveParameter] string $apiKey, array $options = [])
     {
@@ -39,12 +39,19 @@ final class ReachBell
             );
         }
         $env = getenv('REACHBELL_API_URL');
-        $baseUrl = $options['baseUrl'] ?? ($env !== false && $env !== '' ? $env : Defaults::BASE_URL);
+        $baseUrl = $options['baseUrl'] ?? ($env !== false && trim($env) !== '' ? trim($env) : Defaults::BASE_URL);
+        $timeout = $options['timeout'] ?? Defaults::TIMEOUT;
+        if (!is_int($timeout) && !is_float($timeout)) {
+            throw new \TypeError('ReachBell: the timeout option must be an int or float number of seconds');
+        }
+        if (!($timeout > 0) || is_infinite($timeout)) {
+            throw new \InvalidArgumentException('ReachBell: the timeout option must be a positive number of seconds');
+        }
 
         $this->http = new HttpClient(
             $apiKey,
             rtrim($baseUrl, '/'),
-            $options['timeout'] ?? Defaults::TIMEOUT,
+            $timeout,
             $options['transport'] ?? new CurlTransport(),
             $options['headers'] ?? [],
         );
@@ -53,6 +60,16 @@ final class ReachBell
         $this->subscribers = new Subscribers($this->http);
         $this->contacts = new Contacts($this->http);
         $this->campaigns = new Campaigns($this->http);
+    }
+
+    /**
+     * Keeps the API key out of var_dump()/print_r() output.
+     *
+     * @return array<string, mixed>
+     */
+    public function __debugInfo(): array
+    {
+        return ['http' => $this->http->__debugInfo()];
     }
 
     /**

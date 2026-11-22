@@ -19,7 +19,7 @@ final class Transactional
      */
     public function send(array $params): array
     {
-        return (array) $this->http->request('POST', '/transactional/send', Payload::compact($params));
+        return $this->http->requestArray('POST', '/transactional/send', Payload::compact($params));
     }
 
     /**
@@ -28,7 +28,7 @@ final class Transactional
      */
     public function email(array $params): array
     {
-        return (array) $this->http->request('POST', '/transactional/email', Payload::compact($params));
+        return $this->http->requestArray('POST', '/transactional/email', Payload::compact($params));
     }
 
     /**
@@ -37,7 +37,7 @@ final class Transactional
      */
     public function sms(array $params): array
     {
-        return (array) $this->http->request('POST', '/transactional/sms', Payload::compact($params));
+        return $this->http->requestArray('POST', '/transactional/sms', Payload::compact($params));
     }
 
     /**
@@ -46,6 +46,6 @@ final class Transactional
      */
     public function whatsapp(array $params): array
     {
-        return (array) $this->http->request('POST', '/transactional/whatsapp', Payload::compact($params));
+        return $this->http->requestArray('POST', '/transactional/whatsapp', Payload::compact($params));
     }
 }

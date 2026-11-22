@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace ReachBell\Helpers;
 
+use ReachBell\Constants\Defaults;
 use ReachBell\ReachBellException;
 use ReachBell\Types\Transport;
 
@@ -11,6 +12,10 @@ final class CurlTransport implements Transport
 {
     public function send(string $method, string $url, #[\SensitiveParameter] array $headers, ?string $body, int $timeout): array
     {
+        if ($timeout <= 0) {
+            // cURL treats 0 as "no timeout"; never let a bad value hang a request.
+            $timeout = Defaults::TIMEOUT;
+        }
         $handle = curl_init($url);
         if ($handle === false) {
             throw new ReachBellException('Could not start a cURL request', 0);

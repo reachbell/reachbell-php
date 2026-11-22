@@ -9,7 +9,7 @@ use ReachBell\Types\Transport;
 
 final class CurlTransport implements Transport
 {
-    public function send(string $method, string $url, array $headers, ?string $body, int $timeout): array
+    public function send(string $method, string $url, #[\SensitiveParameter] array $headers, ?string $body, int $timeout): array
     {
         $handle = curl_init($url);
         if ($handle === false) {

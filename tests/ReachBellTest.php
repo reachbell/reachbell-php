@@ -126,6 +126,20 @@ final class ReachBellTest extends TestCase
         $this->assertSame('https://api.test/billing/plans?currency=USD&all=true', $t->calls[0]['url']);
     }
 
+    public function testApiKeyIsRedactedFromStackTraces(): void
+    {
+        if (PHP_VERSION_ID < 80200) {
+            $this->markTestSkipped('#[SensitiveParameter] needs PHP 8.2');
+        }
+        try {
+            new ReachBell('rb_secret_hidden', ['transport' => new FakeTransport(), 'timeout' => '15']);
+            $this->fail('expected TypeError');
+        } catch (\TypeError $e) {
+            $this->assertStringNotContainsString('rb_secret_hidden', $e->getTraceAsString());
+            $this->assertStringNotContainsString('rb_secret_hidden', var_export(array_column($e->getTrace(), 'args'), true));
+        }
+    }
+
     public function testPublicKeyRaisesNotice(): void
     {
         $raised = false;

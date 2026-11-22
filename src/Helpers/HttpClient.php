@@ -15,7 +15,7 @@ final class HttpClient
      * @param array<string, string> $headers
      */
     public function __construct(
-        private readonly string $apiKey,
+        #[\SensitiveParameter] private readonly string $apiKey,
         private readonly string $baseUrl,
         private readonly int $timeout,
         private readonly Transport $transport,

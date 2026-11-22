@@ -26,7 +26,7 @@ final class ReachBell
     /**
      * @param array{baseUrl?: string, timeout?: int, transport?: Transport, headers?: array<string, string>} $options
      */
-    public function __construct(string $apiKey, array $options = [])
+    public function __construct(#[\SensitiveParameter] string $apiKey, array $options = [])
     {
         $apiKey = trim($apiKey);
         if ($apiKey === '') {

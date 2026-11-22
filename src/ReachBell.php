@@ -52,6 +52,11 @@ final class ReachBell
         if (!($timeout > 0) || is_infinite($timeout)) {
             throw new \InvalidArgumentException('ReachBell: the timeout option must be a positive number of seconds');
         }
+        if ($timeout > Defaults::MAX_TIMEOUT) {
+            // Rounded up it would overflow cURL's timeout (or int itself) and the
+            // request would run with no timeout at all.
+            throw new \InvalidArgumentException('ReachBell: the timeout option must be at most ' . Defaults::MAX_TIMEOUT . ' seconds, got ' . $timeout);
+        }
 
         $this->http = new HttpClient(
             $apiKey,

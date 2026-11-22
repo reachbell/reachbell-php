@@ -35,7 +35,10 @@ final class CurlTransport implements Transport
         if ($body !== null) {
             $options[CURLOPT_POSTFIELDS] = $body;
         }
-        curl_setopt_array($handle, $options);
+        if (!curl_setopt_array($handle, $options)) {
+            // E.g. a timeout above cURL's limit: never send without the options applied.
+            throw new ReachBellException('Could not configure the cURL request (invalid option, e.g. a timeout above ' . Defaults::MAX_TIMEOUT . ' seconds)', 0);
+        }
         $response = curl_exec($handle);
         if ($response === false) {
             $error = curl_error($handle);

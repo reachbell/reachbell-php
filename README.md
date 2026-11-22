@@ -26,7 +26,7 @@ try {
 }
 ```
 
-Use the secret key (`rb_secret_…`) from **Settings → API keys** and keep it on your server. Option arrays use the API's camelCase keys, and `null` values are dropped, including inside nested arrays (empty arrays, and `null` entries inside lists, are sent as given).
+Use the secret key (`rb_secret_…`) from **Settings → API keys** and keep it on your server. Option arrays use the API's camelCase keys, and `null` values are dropped, including inside nested arrays and `\stdClass` objects. Empty arrays are sent as given. An array whose keys are all integers in ascending order (a list, or a list with gaps such as the result of `array_unique()` or `array_filter()`) is treated as a list: its `null` entries are kept and it is re-indexed, so it is always sent as a JSON array. Any other array is a map: `null` values are dropped and the keys kept, and a map that ends up empty is sent as `{}`.
 
 | Method | Endpoint |
 |---|---|
@@ -47,13 +47,32 @@ Use the secret key (`rb_secret_…`) from **Settings → API keys** and keep it 
 
 Failed requests throw `ReachBell\ReachBellException` with `statusCode` (`0` for network errors and timeouts) and the decoded response `body`. A non-JSON error page is shortened to a one-line snippet in the message (the full text stays in `body`). The resource methods always return an array: an empty response becomes `[]`, and a 2xx response that is not a JSON object or array (plain text, a bare `true`) throws a `ReachBellException` with that status. `request()` returns the decoded body as-is.
 
-Options (second constructor argument): `baseUrl` (defaults to `REACHBELL_API_URL` or `https://api.reachbell.com`), `timeout` in seconds (default 15; must be positive, fractions round up to whole seconds), `headers`, and `transport` (any `ReachBell\Types\Transport`).
+Options (second constructor argument): `baseUrl` (defaults to `REACHBELL_API_URL` or `https://api.reachbell.com`), `timeout` in seconds (default 15; must be positive and at most 2147483, about 24.8 days, the largest timeout cURL accepts; fractions round up to whole seconds), `headers`, and `transport` (any `ReachBell\Types\Transport`).
 
 A custom transport receives the `x-api-key` header in `$headers`. Mark that parameter `#[\SensitiveParameter]`, as `CurlTransport` does, so the key stays out of stack traces on PHP 8.2+:
 
 ```php
 public function send(string $method, string $url, #[\SensitiveParameter] array $headers, ?string $body, int $timeout): array
 ```
+
+## Security notes
+
+- **The client cannot be serialized (breaking change in 1.1.0).** `serialize()` of a `ReachBell` instance, or of anything holding one, throws `LogicException`, because it would write the API key in plain text into a cache, session or queue payload. This affects code that stores the client on a queued job (e.g. a Laravel job's constructor property). To migrate, do not put the client on the job: build it where the job runs, or inject it there from your container.
+
+  ```php
+  // Before (1.0.x): the client, and its key, were serialized with the job.
+  public function __construct(private ReachBell $rb, private string $userId) {}
+
+  // After: pass only data, and create or inject the client when the job runs.
+  public function __construct(private string $userId) {}
+
+  public function handle(ReachBell $rb): void // or: new ReachBell(getenv('REACHBELL_SECRET_KEY'))
+  {
+      $rb->events->track(['name' => 'signup', 'externalId' => $this->userId]);
+  }
+  ```
+
+- `var_dump()`, `print_r()` and (on PHP 8.2+) stack traces show the key as `[redacted]`. **`var_export()` cannot be hooked and still prints the key**, as do `(array)` casts and reflection: don't `var_export()` the client or log it with tools that use them.
 
 Full documentation: https://docs.reachbell.com/server/php
 

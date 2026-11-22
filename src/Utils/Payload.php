@@ -9,32 +9,77 @@ final class Payload
     private const SNIPPET_LENGTH = 200;
 
     /**
-     * Drops null values from a payload, recursing into nested maps. Empty arrays
-     * are kept (they are often intentional, e.g. clearing a list), and null
-     * elements inside lists are kept so positional values do not shift.
+     * Drops null values from a payload, recursing into nested arrays and
+     * \stdClass objects. Empty arrays are kept (they are often intentional, e.g.
+     * clearing a list).
      *
-     * Keys are preserved exactly. A map (a non-list array) that ends up empty or
-     * list-shaped after its nulls are dropped, e.g. ['tags' => null] or
-     * [0 => 'a', 2 => null], is returned as a \stdClass so it still encodes as a
-     * JSON object ({} or {"0":"a"}) instead of a JSON array.
+     * Rule for arrays:
+     * - An array whose keys are all ints in ascending order (a list, or a list
+     *   with gaps such as the result of array_unique() or array_filter()) is a
+     *   list: null elements are kept so positions do not shift, and the result is
+     *   re-indexed with array_values() so it always encodes as a JSON array.
+     * - Every other array is a map: null values are dropped and the remaining
+     *   keys are kept. A map that ends up empty or list-shaped, e.g.
+     *   ['tags' => null] or [0 => 'a', 'b' => null], is returned as a \stdClass
+     *   so it still encodes as a JSON object ({} or {"0":"a"}).
+     * - A \stdClass is always a map: null properties are dropped and a \stdClass
+     *   is returned.
      *
-     * @param array<array-key, mixed> $data
+     * Other objects (e.g. JsonSerializable) are passed through untouched.
+     *
+     * @param array<array-key, mixed>|\stdClass $data
      * @return array<array-key, mixed>|\stdClass
      */
-    public static function compact(array $data): array|\stdClass
+    public static function compact(array|\stdClass $data): array|\stdClass
     {
-        $isList = array_is_list($data);
+        if ($data instanceof \stdClass) {
+            return (object) self::compactMap(get_object_vars($data));
+        }
+        if (self::isListLike($data)) {
+            return array_values(array_map([self::class, 'compactValue'], $data));
+        }
+        $out = self::compactMap($data);
+        return array_is_list($out) ? (object) $out : $out;
+    }
+
+    /**
+     * @param array<array-key, mixed> $data
+     * @return array<array-key, mixed>
+     */
+    private static function compactMap(array $data): array
+    {
         $out = [];
         foreach ($data as $key => $value) {
-            if ($value === null && !$isList) {
-                continue;
+            if ($value !== null) {
+                $out[$key] = self::compactValue($value);
             }
-            $out[$key] = is_array($value) ? self::compact($value) : $value;
-        }
-        if (!$isList && array_is_list($out)) {
-            return (object) $out;
         }
         return $out;
+    }
+
+    private static function compactValue(mixed $value): mixed
+    {
+        return is_array($value) || $value instanceof \stdClass ? self::compact($value) : $value;
+    }
+
+    /**
+     * Whether every key is an int and the keys are in ascending order.
+     *
+     * @param array<array-key, mixed> $data
+     */
+    private static function isListLike(array $data): bool
+    {
+        if (array_is_list($data)) {
+            return true;
+        }
+        $previous = null;
+        foreach ($data as $key => $_) {
+            if (!is_int($key) || ($previous !== null && $key <= $previous)) {
+                return false;
+            }
+            $previous = $key;
+        }
+        return true;
     }
 
     public static function decode(string $body): mixed

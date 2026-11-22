@@ -131,7 +131,8 @@ final class HttpClient
      * Merges the SDK defaults with the caller's headers. Names are compared
      * case-insensitively so a header is never sent twice: the caller can override
      * Accept, User-Agent and Content-Type (the SDK's spelling of the name is kept),
-     * but x-api-key always comes from the client's API key.
+     * but x-api-key always comes from the client's API key. Content-Type is only
+     * sent with a body, so a caller's Content-Type is dropped on GET/DELETE.
      *
      * @return array<string, string>
      */
@@ -148,6 +149,11 @@ final class HttpClient
         }
         foreach ($this->headers as $name => $value) {
             $lower = strtolower((string) $name);
+            if (!$hasBody && $lower === 'content-type') {
+                // Nothing to describe: a Content-Type on a body-less GET/DELETE can
+                // make proxies or the API expect a body.
+                continue;
+            }
             $merged[$lower] = [$merged[$lower][0] ?? (string) $name, (string) $value];
         }
         $merged['x-api-key'] = ['x-api-key', $this->apiKey];

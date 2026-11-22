@@ -7,6 +7,7 @@ namespace ReachBell\Tests;
 use PHPUnit\Framework\TestCase;
 use ReachBell\ReachBell;
 use ReachBell\ReachBellException;
+use ReachBell\Utils\Payload;
 
 final class ReachBellTest extends TestCase
 {
@@ -269,18 +270,74 @@ final class ReachBellTest extends TestCase
         $this->assertTrue($raised);
     }
 
-    public function testAllNullMapsStayJsonObjectsAndIntKeysArePreserved(): void
+    public function testAllNullMapsStayJsonObjectsAndAscendingIntKeysAreLists(): void
     {
         $t = new FakeTransport();
         $rb = $this->client($t);
         $rb->campaigns->send(['name' => 'Sale', 'content' => ['title' => 'T', 'data' => ['k' => null]], 'segment' => ['tags' => null]]);
         $this->assertSame('{"name":"Sale","content":{"title":"T","data":{}},"segment":{}}', $t->calls[0]['body']);
 
-        $rb->events->track(['name' => 'e', 'properties' => [0 => 'a', 2 => null, 5 => 'b'], 'scores' => [1 => null, 0 => 'x']]);
-        $this->assertSame('{"name":"e","properties":{"0":"a","5":"b"},"scores":{"0":"x"}}', $t->calls[1]['body']);
+        // Ascending int keys (gapped lists, e.g. from array_unique) are lists:
+        // nulls kept, re-indexed. Other int-key orders and mixed keys are maps.
+        $rb->events->track([
+            'name' => 'e',
+            'properties' => array_unique(['a', null, 'a', 'b']),
+            'gapped' => [0 => 'a', 2 => null, 5 => 'b'],
+            'scores' => [1 => null, 0 => 'x'],
+            'mixed' => [0 => 'a', 'k' => null],
+        ]);
+        $this->assertSame('{"name":"e","properties":["a",null,"b"],"gapped":["a",null,"b"],"scores":{"0":"x"},"mixed":{"0":"a"}}', $t->calls[1]['body']);
 
         $rb->events->track(['name' => 'e', 'list' => ['a', null], 'empty' => []]);
         $this->assertSame('{"name":"e","list":["a",null],"empty":[]}', $t->calls[2]['body']);
+    }
+
+    public function testCompactRecursesIntoStdClass(): void
+    {
+        $t = new FakeTransport();
+        $rb = $this->client($t);
+        $data = new \stdClass();
+        $data->a = null;
+        $data->b = 1;
+        $data->nested = (object) ['x' => null, 'list' => ['p', null]];
+        $rb->events->track(['name' => 'e', 'data' => $data, 'none' => (object) ['z' => null]]);
+        $this->assertSame('{"name":"e","data":{"b":1,"nested":{"list":["p",null]}},"none":{}}', $t->calls[0]['body']);
+        $this->assertSame(1, $data->b);
+        $this->assertTrue(property_exists($data, 'a'), 'the caller object is not modified');
+
+        $out = Payload::compact((object) ['a' => null, 'b' => 2]);
+        $this->assertTrue($out instanceof \stdClass);
+        $this->assertSame(['b' => 2], get_object_vars($out));
+    }
+
+    public function testBodylessRequestsDropCallerContentType(): void
+    {
+        $t = new FakeTransport();
+        $rb = new ReachBell('rb_secret_test', ['transport' => $t, 'headers' => ['content-type' => 'application/merge-patch+json']]);
+        $rb->request('GET', '/x');
+        $rb->request('DELETE', '/x');
+        $rb->request('POST', '/x', ['a' => 1]);
+        foreach ([0, 1] as $i) {
+            $lower = array_map('strtolower', array_keys($t->calls[$i]['headers']));
+            $this->assertTrue(!in_array('content-type', $lower, true), 'no Content-Type on call ' . $i);
+            $this->assertNull($t->calls[$i]['body']);
+        }
+        $this->assertSame('application/merge-patch+json', $t->calls[2]['headers']['Content-Type']);
+    }
+
+    public function testRejectsTimeoutsAboveTheCurlLimit(): void
+    {
+        foreach ([\ReachBell\Constants\Defaults::MAX_TIMEOUT + 1, \ReachBell\Constants\Defaults::MAX_TIMEOUT + 0.5, PHP_INT_MAX, 1e19] as $bad) {
+            try {
+                new ReachBell('rb_secret_test', ['transport' => new FakeTransport(), 'timeout' => $bad]);
+                $this->fail('expected InvalidArgumentException for ' . var_export($bad, true));
+            } catch (\InvalidArgumentException $e) {
+                $this->assertStringContainsString('at most 2147483 seconds', $e->getMessage());
+            }
+        }
+        $t = new FakeTransport();
+        (new ReachBell('rb_secret_test', ['transport' => $t, 'timeout' => \ReachBell\Constants\Defaults::MAX_TIMEOUT]))->request('GET', '/x');
+        $this->assertSame(2147483, $t->calls[0]['timeout']);
     }
 
     public function testNonUtf8ErrorPageIsTruncated(): void

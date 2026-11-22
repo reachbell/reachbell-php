@@ -15,7 +15,7 @@ final class FakeTransport implements Transport
     {
     }
 
-    public function send(string $method, string $url, array $headers, ?string $body, int $timeout): array
+    public function send(string $method, string $url, #[\SensitiveParameter] array $headers, ?string $body, int $timeout): array
     {
         $this->calls[] = compact('method', 'url', 'headers', 'body', 'timeout');
         return ['status' => $this->status, 'body' => $this->response];

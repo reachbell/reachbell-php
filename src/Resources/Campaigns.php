@@ -26,6 +26,6 @@ final class Campaigns
             $campaign['scheduledAt'] = $campaign['scheduledAt']->format(\DateTimeInterface::ATOM);
         }
         $campaign['segment'] = isset($campaign['segment']) && $campaign['segment'] !== [] ? $campaign['segment'] : new \stdClass();
-        return (array) $this->http->request('POST', '/campaigns/server', Payload::compact($campaign));
+        return $this->http->requestArray('POST', '/campaigns/server', Payload::compact($campaign));
     }
 }

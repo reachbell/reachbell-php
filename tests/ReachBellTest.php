@@ -126,6 +126,137 @@ final class ReachBellTest extends TestCase
         $this->assertSame('https://api.test/billing/plans?currency=USD&all=true', $t->calls[0]['url']);
     }
 
+    public function testApiKeyIsRedactedFromStackTraces(): void
+    {
+        if (PHP_VERSION_ID < 80200) {
+            $this->markTestSkipped('#[SensitiveParameter] needs PHP 8.2');
+        }
+        // With zend.exception_ignore_args=On (the php.ini-production default) traces
+        // carry no arguments at all and the assertions below would pass vacuously.
+        $previous = ini_get('zend.exception_ignore_args');
+        if (ini_set('zend.exception_ignore_args', '0') === false) {
+            $this->markTestSkipped('zend.exception_ignore_args cannot be changed at runtime here');
+        }
+        try {
+            try {
+                new ReachBell('rb_secret_hidden', ['transport' => new FakeTransport(), 'timeout' => '15']);
+                $this->fail('expected TypeError');
+            } catch (\TypeError $e) {
+                $this->assertNotEmpty(array_filter(array_column($e->getTrace(), 'args')), 'trace should carry arguments');
+                $this->assertStringNotContainsString('rb_secret_hidden', $e->getTraceAsString());
+                $this->assertStringNotContainsString('rb_secret_hidden', var_export(array_column($e->getTrace(), 'args'), true));
+            }
+
+            $throwing = new class implements \ReachBell\Types\Transport {
+                public function send(string $method, string $url, #[\SensitiveParameter] array $headers, ?string $body, int $timeout): array
+                {
+                    throw new \RuntimeException('network down');
+                }
+            };
+            try {
+                (new ReachBell('rb_secret_hidden', ['transport' => $throwing]))->request('GET', '/x');
+                $this->fail('expected RuntimeException');
+            } catch (\RuntimeException $e) {
+                $this->assertStringNotContainsString('rb_secret_hidden', var_export(array_column($e->getTrace(), 'args'), true));
+            }
+        } finally {
+            ini_set('zend.exception_ignore_args', (string) $previous);
+        }
+    }
+
+    public function testDebugOutputRedactsApiKey(): void
+    {
+        $rb = new ReachBell('rb_secret_hidden', ['transport' => new FakeTransport()]);
+        ob_start();
+        var_dump($rb, $rb->transactional);
+        $dump = (string) ob_get_clean() . print_r($rb, true) . print_r($rb->events, true);
+        $this->assertStringNotContainsString('rb_secret_hidden', $dump);
+        $this->assertStringContainsString('[redacted]', $dump);
+    }
+
+    public function testRejectsNonPositiveTimeouts(): void
+    {
+        foreach ([0, -1, 0.0, NAN, INF] as $bad) {
+            try {
+                new ReachBell('rb_secret_test', ['transport' => new FakeTransport(), 'timeout' => $bad]);
+                $this->fail('expected InvalidArgumentException for ' . var_export($bad, true));
+            } catch (\InvalidArgumentException) {
+                $this->addToAssertionCount(1);
+            }
+        }
+    }
+
+    public function testFloatTimeoutIsAcceptedAndRoundedUp(): void
+    {
+        $t = new FakeTransport();
+        (new ReachBell('rb_secret_test', ['transport' => $t, 'timeout' => 2.5]))->request('GET', '/x');
+        $this->assertSame(3, $t->calls[0]['timeout']);
+    }
+
+    public function testQueryIsAppendedToPathThatAlreadyHasOne(): void
+    {
+        $t = new FakeTransport();
+        $this->client($t)->request('GET', '/x?a=1', null, ['b' => 2]);
+        $this->assertSame('https://api.test/x?a=1&b=2', $t->calls[0]['url']);
+    }
+
+    public function testNonJsonSuccessBodyThrowsFromResources(): void
+    {
+        foreach (['OK', 'true', '"done"'] as $raw) {
+            try {
+                $this->client(new FakeTransport(200, $raw))->events->track(['name' => 'e', 'externalId' => 'u']);
+                $this->fail('expected exception for ' . $raw);
+            } catch (ReachBellException $e) {
+                $this->assertSame(200, $e->statusCode);
+                $this->assertStringContainsString('unexpected response', $e->getMessage());
+            }
+        }
+        $this->assertSame([], $this->client(new FakeTransport(204, ''))->subscribers->delete('t'));
+    }
+
+    public function testNestedNullsAreDroppedButEmptyArraysAndListNullsKept(): void
+    {
+        $t = new FakeTransport();
+        $this->client($t)->transactional->whatsapp([
+            'to' => '+15550100',
+            'template' => ['name' => 'otp', 'language' => null, 'params' => ['1', null], 'buttons' => []],
+            'data' => ['a' => ['b' => null, 'c' => 1]],
+        ]);
+        $this->assertSame(
+            '{"to":"+15550100","template":{"name":"otp","params":["1",null],"buttons":[]},"data":{"a":{"c":1}}}',
+            $t->calls[0]['body'],
+        );
+    }
+
+    public function testNonJsonErrorPageIsTruncated(): void
+    {
+        $html = '<html><body><h1>502 Bad Gateway</h1>' . str_repeat('<p>nginx padding</p>', 100) . '</body></html>';
+        try {
+            $this->client(new FakeTransport(502, $html))->request('GET', '/x');
+            $this->fail('expected exception');
+        } catch (ReachBellException $e) {
+            $this->assertStringStartsWith('ReachBell returned 502: 502 Bad Gateway', $e->getMessage());
+            $this->assertLessThan(260, strlen($e->getMessage()));
+            $this->assertStringNotContainsString('<', $e->getMessage());
+            $this->assertSame($html, $e->body);
+        }
+    }
+
+    public function testNestedValidationMessagesAreEncoded(): void
+    {
+        $t = new FakeTransport(400, '{"message":["bad title",{"field":"body","error":"required"},3]}');
+        $this->expectExceptionMessage('bad title; {"field":"body","error":"required"}; 3');
+        $this->client($t)->request('POST', '/x', ['a' => 1]);
+    }
+
+    public function testPostWithoutBodySendsEmptyJsonObject(): void
+    {
+        $t = new FakeTransport();
+        $this->client($t)->request('POST', '/x');
+        $this->assertSame('{}', $t->calls[0]['body']);
+        $this->assertSame('application/json', $t->calls[0]['headers']['Content-Type']);
+    }
+
     public function testPublicKeyRaisesNotice(): void
     {
         $raised = false;
@@ -136,5 +267,65 @@ final class ReachBellTest extends TestCase
         new ReachBell('rb_live_x', ['transport' => new FakeTransport()]);
         restore_error_handler();
         $this->assertTrue($raised);
+    }
+
+    public function testAllNullMapsStayJsonObjectsAndIntKeysArePreserved(): void
+    {
+        $t = new FakeTransport();
+        $rb = $this->client($t);
+        $rb->campaigns->send(['name' => 'Sale', 'content' => ['title' => 'T', 'data' => ['k' => null]], 'segment' => ['tags' => null]]);
+        $this->assertSame('{"name":"Sale","content":{"title":"T","data":{}},"segment":{}}', $t->calls[0]['body']);
+
+        $rb->events->track(['name' => 'e', 'properties' => [0 => 'a', 2 => null, 5 => 'b'], 'scores' => [1 => null, 0 => 'x']]);
+        $this->assertSame('{"name":"e","properties":{"0":"a","5":"b"},"scores":{"0":"x"}}', $t->calls[1]['body']);
+
+        $rb->events->track(['name' => 'e', 'list' => ['a', null], 'empty' => []]);
+        $this->assertSame('{"name":"e","list":["a",null],"empty":[]}', $t->calls[2]['body']);
+    }
+
+    public function testNonUtf8ErrorPageIsTruncated(): void
+    {
+        $html = '<html><body>' . str_repeat("Caf\xE9 indisponible ", 100) . '</body></html>';
+        try {
+            $this->client(new FakeTransport(502, $html))->request('GET', '/x');
+            $this->fail('expected exception');
+        } catch (ReachBellException $e) {
+            $this->assertStringStartsWith('ReachBell returned 502: Caf', $e->getMessage());
+            $this->assertLessThan(260, strlen($e->getMessage()));
+            $this->assertSame($html, $e->body);
+        }
+    }
+
+    public function testHeadersMergeCaseInsensitivelyAndApiKeyWins(): void
+    {
+        $t = new FakeTransport();
+        $rb = new ReachBell('rb_secret_test', ['transport' => $t, 'headers' => [
+            'X-API-KEY' => 'other', 'content-type' => 'application/merge-patch+json', 'accept' => 'text/plain', 'X-Trace' => '1',
+        ]]);
+        $rb->request('PATCH', '/x', ['a' => 1]);
+        $headers = $t->calls[0]['headers'];
+
+        $this->assertSame('rb_secret_test', $headers['x-api-key']);
+        $this->assertSame('application/merge-patch+json', $headers['Content-Type']);
+        $this->assertSame('text/plain', $headers['Accept']);
+        $this->assertSame('1', $headers['X-Trace']);
+        $lower = array_map('strtolower', array_keys($headers));
+        $this->assertSame($lower, array_unique($lower));
+        $this->assertCount(5, $headers);
+    }
+
+    public function testBlankBaseUrlFallsBackToDefault(): void
+    {
+        foreach (['', '   '] as $blank) {
+            $t = new FakeTransport();
+            (new ReachBell('rb_secret_test', ['baseUrl' => $blank, 'transport' => $t]))->request('GET', '/x');
+            $this->assertStringStartsWith(\ReachBell\Constants\Defaults::BASE_URL . '/x', $t->calls[0]['url']);
+        }
+    }
+
+    public function testClientCannotBeSerialized(): void
+    {
+        $this->expectException(\LogicException::class);
+        serialize($this->client(new FakeTransport()));
     }
 }

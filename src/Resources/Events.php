@@ -20,7 +20,7 @@ final class Events
      */
     public function track(array $event): array
     {
-        return (array) $this->http->request('POST', '/events', Payload::compact($event));
+        return $this->http->requestArray('POST', '/events', Payload::compact($event));
     }
 
     /**
@@ -31,7 +31,7 @@ final class Events
     {
         $results = [];
         foreach (array_chunk(array_values($events), Defaults::MAX_EVENT_BATCH) as $chunk) {
-            $results[] = (array) $this->http->request('POST', '/events', [
+            $results[] = $this->http->requestArray('POST', '/events', [
                 'events' => array_map([Payload::class, 'compact'], $chunk),
             ]);
         }

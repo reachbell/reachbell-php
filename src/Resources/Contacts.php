@@ -19,12 +19,12 @@ final class Contacts
      */
     public function upsertEmail(array $contact): array
     {
-        return (array) $this->http->request('POST', '/contacts/email', Payload::compact($contact));
+        return $this->http->requestArray('POST', '/contacts/email', Payload::compact($contact));
     }
 
     /** @return array<string, mixed> */
     public function unsubscribeEmail(string $email): array
     {
-        return (array) $this->http->request('POST', '/contacts/email/unsubscribe', ['email' => $email]);
+        return $this->http->requestArray('POST', '/contacts/email/unsubscribe', ['email' => $email]);
     }
 }

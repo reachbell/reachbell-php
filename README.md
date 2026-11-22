@@ -26,7 +26,7 @@ try {
 }
 ```
 
-Use the secret key (`rb_secret_…`) from **Settings → API keys** and keep it on your server. Option arrays use the API's camelCase keys, and `null` values are dropped.
+Use the secret key (`rb_secret_…`) from **Settings → API keys** and keep it on your server. Option arrays use the API's camelCase keys, and `null` values are dropped, including inside nested arrays (empty arrays, and `null` entries inside lists, are sent as given).
 
 | Method | Endpoint |
 |---|---|
@@ -45,9 +45,15 @@ Use the secret key (`rb_secret_…`) from **Settings → API keys** and keep it 
 | `campaigns->send($campaign)` | `POST /campaigns/server` |
 | `request($method, $path, $body, $query)` | any endpoint |
 
-Failed requests throw `ReachBell\ReachBellException` with `statusCode` (`0` for network errors and timeouts) and the decoded response `body`.
+Failed requests throw `ReachBell\ReachBellException` with `statusCode` (`0` for network errors and timeouts) and the decoded response `body`. A non-JSON error page is shortened to a one-line snippet in the message (the full text stays in `body`). The resource methods always return an array: an empty response becomes `[]`, and a 2xx response that is not a JSON object or array (plain text, a bare `true`) throws a `ReachBellException` with that status. `request()` returns the decoded body as-is.
 
-Options (second constructor argument): `baseUrl` (defaults to `REACHBELL_API_URL` or `https://api.reachbell.com`), `timeout` in seconds (default 15), `headers`, and `transport` (any `ReachBell\Types\Transport`).
+Options (second constructor argument): `baseUrl` (defaults to `REACHBELL_API_URL` or `https://api.reachbell.com`), `timeout` in seconds (default 15; must be positive, fractions round up to whole seconds), `headers`, and `transport` (any `ReachBell\Types\Transport`).
+
+A custom transport receives the `x-api-key` header in `$headers`. Mark that parameter `#[\SensitiveParameter]`, as `CurlTransport` does, so the key stays out of stack traces on PHP 8.2+:
+
+```php
+public function send(string $method, string $url, #[\SensitiveParameter] array $headers, ?string $body, int $timeout): array
+```
 
 Full documentation: https://docs.reachbell.com/server/php
 

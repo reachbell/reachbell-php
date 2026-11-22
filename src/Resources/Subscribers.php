@@ -15,7 +15,7 @@ final class Subscribers
     /** @return array<string, mixed> */
     public function identify(string $token, string $externalId): array
     {
-        return (array) $this->http->request('POST', '/subscribers/identify', ['token' => $token, 'externalId' => $externalId]);
+        return $this->http->requestArray('POST', '/subscribers/identify', ['token' => $token, 'externalId' => $externalId]);
     }
 
     /**
@@ -24,7 +24,7 @@ final class Subscribers
      */
     public function tag(string $token, array $tags): array
     {
-        return (array) $this->http->request('POST', '/subscribers/tag', ['token' => $token, 'tags' => array_values($tags)]);
+        return $this->http->requestArray('POST', '/subscribers/tag', ['token' => $token, 'tags' => array_values($tags)]);
     }
 
     /**
@@ -33,12 +33,12 @@ final class Subscribers
      */
     public function untag(string $token, array $tags): array
     {
-        return (array) $this->http->request('POST', '/subscribers/untag', ['token' => $token, 'tags' => array_values($tags)]);
+        return $this->http->requestArray('POST', '/subscribers/untag', ['token' => $token, 'tags' => array_values($tags)]);
     }
 
     /** @return array<string, mixed> */
     public function delete(string $token): array
     {
-        return (array) $this->http->request('DELETE', '/subscribers/' . rawurlencode($token));
+        return $this->http->requestArray('DELETE', '/subscribers/' . rawurlencode($token));
     }
 }
